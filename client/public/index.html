@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FPS Magic Game</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        /* Estilos básicos para remover margens e garantir que o canvas ocupe espaço */
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        #game-container { width: 100vw; height: 100vh; display: block; cursor: crosshair; /* Muda cursor sobre o jogo */ }
+        canvas { display: block; } /* Garante que o canvas não tenha espaço extra abaixo */
+
+        /* --- ESTILOS DA MIRA --- */
+        .crosshair {
+            position: absolute;
+            background-color: rgba(0, 255, 0, 0.7); /* Verde semi-transparente */
+            pointer-events: none; /* Não interfere com cliques do mouse */
+            box-shadow: 0 0 3px rgba(0, 255, 0, 0.5); /* Leve brilho */
+            z-index: 10; /* Garante que fique sobre o canvas */
+        }
+        #crosshair-h { /* Linha horizontal */
+            width: 20px;
+            height: 2px;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+        #crosshair-v { /* Linha vertical */
+            width: 2px;
+            height: 20px;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+        #crosshair-dot { /* Ponto central (opcional) */
+             width: 3px;
+             height: 3px;
+             top: 50%;
+             left: 50%;
+             transform: translate(-50%, -50%);
+             border-radius: 50%;
+             /* Ajuste de espaço - afasta as linhas do ponto */
+             /* Se usar o ponto, talvez ajustar o tamanho/posicionamento das linhas */
+        }
+        /* --- FIM ESTILOS DA MIRA --- */
+    </style>
+
+    <!-- ===================== IMPORT MAP ===================== -->
+    <script type="importmap">
+        {
+          "imports": {
+            "three": "/node_modules/three/build/three.module.js"
+          }
+        }
+        </script>
+        <!-- ======================================================= -->
+</head>
+<body>
+    <div id="game-container">
+        <!-- O canvas do Three.js será inserido aqui pelo renderer.js posteriormente -->
+        
+        <!-- Elementos da Mira -->
+        <div id="crosshair-h" class="crosshair"></div>
+        <div id="crosshair-v" class="crosshair"></div>
+        <!-- <div id="crosshair-dot" class="crosshair"></div> --> <!-- Descomente para adicionar ponto central -->
+    </div>
+
+    <!-- Biblioteca cliente do Socket.IO via CDN -->
+    <!-- Certifique-se que a versão corresponde à do servidor (v4.x) -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+    <!-- Ponto de entrada do jogo cliente (usando type="module" para imports) -->
+    <script type="module" src="/src/main.js"></script>
+</body>
+</html>
