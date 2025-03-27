@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { log, warn } from '../../../shared/utils/logger.js';
 import gameMap from '../../../shared/gameplay/world/map.js'; // Importar para pegar limites
 import { PLAYER_EYE_HEIGHT } from '../../../shared/constants/game-settings.js'; // Importar a constante unificada
+import { createWeaponMesh } from '../generation/weapon-model-generator.js';
 
 const IMPACT_EFFECT_DURATION_MS = 500; // Duração do efeito em milissegundos
 const IMPACT_EFFECT_SIZE = 0.3;

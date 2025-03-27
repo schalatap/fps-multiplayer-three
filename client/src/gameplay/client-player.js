@@ -68,6 +68,12 @@ export class ClientPlayer extends Player {
     /** @type {import('three').Mesh | import('three').Group | null} */
     mesh = null;
 
+    // --- Propriedades de Animação ---
+    animationTime = 0;
+    walkSpeedFactor = 8; // Quão rápido a animação de andar toca
+    walkAmplitude = 0.4; // Quão amplo é o movimento de braços/pernas
+    // -----------------------------
+
     /**
      * @param {PlayerState} initialState - O primeiro estado recebido do servidor.
      */
@@ -181,6 +187,7 @@ export class ClientPlayer extends Player {
      */
     update(deltaTime) {
         const isLocalPlayer = this.id === NetworkManager.getLocalPlayerId();
+        let isMovingHorizontally = false; // Flag para animação
 
         if (isLocalPlayer) {
             // --- Predição de Movimento (Jogador Local) ---
@@ -190,7 +197,7 @@ export class ClientPlayer extends Player {
                 const currentYaw = _inputController.getYaw();
 
                 // 2. Calcular/Atualizar velocidade local com aceleração/atrito
-                this.applyInputLocally(currentKeys, currentYaw, deltaTime); // Passa deltaTime agora
+                this.applyInputLocally(currentKeys, currentYaw, deltaTime);
 
                 // --- APLICAR GRAVIDADE NA PREDIÇÃO ---
                 // Somente se não estivermos "no chão" (simples: verifica se Y > 0)
@@ -216,10 +223,15 @@ export class ClientPlayer extends Player {
 
                 // Zera velocidade Y local se colidiu com chão
                 const GROUND_Y = _gameMap.getBounds().min.y;
-                 const IS_ON_GROUND = finalPosition.y <= GROUND_Y + 0.01;
-                 if (IS_ON_GROUND && this.velocity.y < 0) {
-                      this.velocity.y = 0;
-                 }
+                const IS_ON_GROUND = finalPosition.y <= GROUND_Y + 0.01;
+                if (IS_ON_GROUND && this.velocity.y < 0) {
+                    this.velocity.y = 0;
+                }
+
+                // --- Verifica se está movendo para animação ---
+                const horizontalVelocitySq = this.velocity.x * this.velocity.x + this.velocity.z * this.velocity.z;
+                isMovingHorizontally = horizontalVelocitySq > MIN_SPEED_THRESHOLD * MIN_SPEED_THRESHOLD;
+                // -------------------------------------------
 
             } else if (!this.isAlive) {
                 // Se local e morto, garantir velocidade zero
@@ -244,14 +256,18 @@ export class ClientPlayer extends Player {
                     const targetPos = new Vector3(this.targetState.position.x, this.targetState.position.y, this.targetState.position.z);
                     this.position.copy(prevPos).lerp(targetPos, alpha);
                 }
-                // Poderíamos interpolar rotação aqui se enviada no estado
 
+                // --- Estimativa de Movimento para Animação Remota ---
+                // Se a posição mudou significativamente desde o último frame, assume movimento
+                if (this.mesh) {
+                    const posDeltaSq = this.position.distanceToSq(this.mesh.position);
+                    isMovingHorizontally = posDeltaSq > (MIN_SPEED_THRESHOLD * deltaTime) * (MIN_SPEED_THRESHOLD * deltaTime);
+                }
+                // -----------------------------------------------------------
             } else if (this.targetState?.position) {
-                 // Se não pode interpolar, usa a posição mais recente conhecida
-                 this.position.set(this.targetState.position.x, this.targetState.position.y, this.targetState.position.z);
+                // Se não pode interpolar, usa a posição mais recente conhecida
+                this.position.set(this.targetState.position.x, this.targetState.position.y, this.targetState.position.z);
             }
-            // Se remoto e morto, a posição interpolada ainda será aplicada,
-            // mas o SceneManager o tornará invisível.
         }
 
         // --- Atualização Visual (Mesh) ---
@@ -261,10 +277,47 @@ export class ClientPlayer extends Player {
             // Atualiza rotação visual do jogador local para corresponder à câmera
             if (isLocalPlayer && _inputController) {
                 this.mesh.rotation.y = _inputController.getYaw();
-                // Se o modelo tiver uma "frente" diferente do eixo Z negativo padrão do Three.js, ajuste:
-                // this.mesh.rotation.y = _inputController.getYaw() + Math.PI;
             }
             // Rotação visual para jogadores remotos (poderia ser interpolada se enviada)
+
+            // --- Animação de Andar Simples ---
+            if (isMovingHorizontally && this.isAlive) {
+                this.animationTime += deltaTime * this.walkSpeedFactor;
+                const swingAngle = Math.sin(this.animationTime) * this.walkAmplitude;
+
+                // Encontra os grupos/meshes das partes
+                const leftLegGroup = this.mesh.getObjectByName('leftLegGroup');
+                const rightLegGroup = this.mesh.getObjectByName('rightLegGroup');
+                const leftArmGroup = this.mesh.getObjectByName('leftArmGroup');
+                const rightArmGroup = this.mesh.getObjectByName('rightArmGroup');
+
+                // Aplica rotação oposta às pernas e braços
+                if (leftLegGroup) leftLegGroup.rotation.x = swingAngle;
+                if (rightLegGroup) rightLegGroup.rotation.x = -swingAngle;
+                if (leftArmGroup) leftArmGroup.rotation.x = -swingAngle; // Braço oposto à perna
+                if (rightArmGroup) rightArmGroup.rotation.x = swingAngle;
+            } else {
+                // Reseta rotações se parado ou morto
+                this.animationTime = 0; // Reseta tempo para começar do 0 na próxima vez
+                const leftLegGroup = this.mesh.getObjectByName('leftLegGroup');
+                const rightLegGroup = this.mesh.getObjectByName('rightLegGroup');
+                const leftArmGroup = this.mesh.getObjectByName('leftArmGroup');
+                const rightArmGroup = this.mesh.getObjectByName('rightArmGroup');
+
+                if (leftLegGroup) leftLegGroup.rotation.x = 0;
+                if (rightLegGroup) rightLegGroup.rotation.x = 0;
+                if (leftArmGroup) leftArmGroup.rotation.x = 0;
+                if (rightArmGroup) rightArmGroup.rotation.x = 0;
+            }
+            // --- Fim Animação ---
+
+            // --- Visibilidade da Arma na Mão ---
+            const heldWeapon = this.mesh.getObjectByName('HeldWeapon');
+            if (heldWeapon) {
+                // Só mostra a arma na mão para jogadores REMOTOS (não o local)
+                heldWeapon.visible = !isLocalPlayer && this.isAlive;
+            }
+            // ---------------------------------
         }
     }
 

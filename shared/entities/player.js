@@ -74,7 +74,7 @@ export class Player extends GameObject {
     switch (hitboxKey?.toLowerCase()) { // Adicionado '?' para segurança e toLowerCase
         case 'head': multiplier = DAMAGE_MULTIPLIER_HEAD; break;
         case 'torso': multiplier = DAMAGE_MULTIPLIER_TORSO; break;
-        case 'arms': multiplier = DAMAGE_MULTIPLIER_ARMS; break;
+        case 'arms': case 'arms_l': case 'arms_r': multiplier = DAMAGE_MULTIPLIER_ARMS; break;
         case 'legs': multiplier = DAMAGE_MULTIPLIER_LEGS; break;
         default: multiplier = DAMAGE_MULTIPLIER_DEFAULT;
     }
@@ -261,9 +261,12 @@ export class Player extends GameObject {
       const torsoWidth = this.width;
       const torsoDepth = this.depth * 0.8;
       const legHeight = this.height * 0.4;
-      const legWidth = this.width * 0.4; // Pernas mais finas
-      const legDepth = this.depth * 0.4;
-      // Braços omitidos por simplicidade, mas poderiam ser adicionados
+      const legWidth = this.width * 0.3; // Pernas mais finas
+      // Dimensões dos braços para hitbox (devem corresponder +/- ao visual)
+      const armLength = this.height * 0.4;
+      const armWidth = this.width * 0.25;
+      const armOffsetY = legHeight + torsoHeight * 0.6; // Y central do braço
+      const armOffsetX = (torsoWidth / 2) + (armWidth / 2) + 0.05; // Afastamento lateral
 
       const legTopY = pos.y + legHeight;
       const torsoTopY = legTopY + torsoHeight;
@@ -286,9 +289,24 @@ export class Player extends GameObject {
       // Pernas (Caixa única - simplificado, poderia ser duas)
       const legCenter = new Vector3(pos.x, pos.y + legHeight / 2, pos.z);
       hitboxes['legs'] = {
-          min: legCenter.clone().subtract(new Vector3(legWidth / 2 + epsilon, legHeight / 2 + epsilon, legDepth / 2 + epsilon)), // Usando legWidth/Depth
-          max: legCenter.clone().add(new Vector3(legWidth / 2 + epsilon, legHeight / 2 + epsilon, legDepth / 2 + epsilon))
+          min: legCenter.clone().subtract(new Vector3(legWidth / 2 + epsilon, legHeight / 2 + epsilon, legWidth / 2 + epsilon)), // Usando legWidth
+          max: legCenter.clone().add(new Vector3(legWidth / 2 + epsilon, legHeight / 2 + epsilon, legWidth / 2 + epsilon))
       };
+
+      // --- HITBOX DOS BRAÇOS ---
+      // Braço Esquerdo
+      const leftArmCenter = new Vector3(pos.x - armOffsetX, pos.y + armOffsetY, pos.z);
+      hitboxes['arms_l'] = { // Chave específica para diferenciar
+          min: leftArmCenter.clone().subtract(new Vector3(armWidth / 2 + epsilon, armLength / 2 + epsilon, armWidth / 2 + epsilon)),
+          max: leftArmCenter.clone().add(new Vector3(armWidth / 2 + epsilon, armLength / 2 + epsilon, armWidth / 2 + epsilon))
+      };
+      // Braço Direito
+      const rightArmCenter = new Vector3(pos.x + armOffsetX, pos.y + armOffsetY, pos.z);
+      hitboxes['arms_r'] = { // Chave específica para diferenciar
+          min: rightArmCenter.clone().subtract(new Vector3(armWidth / 2 + epsilon, armLength / 2 + epsilon, armWidth / 2 + epsilon)),
+          max: rightArmCenter.clone().add(new Vector3(armWidth / 2 + epsilon, armLength / 2 + epsilon, armWidth / 2 + epsilon))
+      };
+      // -------------------------
 
       return hitboxes;
   }

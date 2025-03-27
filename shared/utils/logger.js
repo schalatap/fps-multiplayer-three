@@ -30,18 +30,3 @@ export function error(...args) {
   console.error(PREFIX_ERROR, ...args);
 }
 
-// Poderia ser expandido para permitir prefixos específicos (CLIENT/SERVER)
-// export function createLogger(prefix) {
-//   return {
-//     log: (...args) => console.log(prefix, ...args),
-//     warn: (...args) => console.warn(prefix, ...args),
-//     error: (...args) => console.error(prefix, ...args),
-//   };
-// }
-
-// const serverLogger = createLogger("[SERVER]");
-// const clientLogger = createLogger("[CLIENT]");
-
-// export { serverLogger, clientLogger };
-
-// Por enquanto, usamos as funções genéricas exportadas diretamente.
