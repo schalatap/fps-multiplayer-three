@@ -1,8 +1,16 @@
 import { GameObject } from '../base/game-object.js';
 import { Vector3 } from '../physics/vector.js';
 import { clamp, generateUUID } from '../utils/math-utils.js';
-import { log, warn } from '../utils/logger.js'; // Added warn import
+import { log, warn } from '../utils/logger.js';
 import { PLAYER_HEIGHT, PLAYER_WIDTH, PLAYER_DEPTH } from '../base/collidable.js';
+// Importar constantes de dano localizado
+import {
+    DAMAGE_MULTIPLIER_HEAD,
+    DAMAGE_MULTIPLIER_TORSO,
+    DAMAGE_MULTIPLIER_ARMS,
+    DAMAGE_MULTIPLIER_LEGS,
+    DAMAGE_MULTIPLIER_DEFAULT
+} from '../constants/combat-settings.js';
 
 const DEFAULT_HEALTH = 100;
 
@@ -56,21 +64,30 @@ export class Player extends GameObject {
   /**
    * Aplica dano ao jogador, reduzindo sua vida.
    * A vida não pode ficar abaixo de 0.
-   * @param {number} amount - Quantidade de dano a ser aplicada.
+   * @param {number} baseAmount - Quantidade de dano base a ser aplicada.
+   * @param {string} [hitboxKey='default'] - A chave da hitbox atingida ('head', 'torso', etc.).
    */
-  takeDamage(amount) {
-    if (!this.isAlive || amount <= 0) return; // Não pode tomar dano se já estiver morto
+  takeDamage(baseAmount, hitboxKey = 'default') {
+    if (!this.isAlive || baseAmount <= 0) return; // Não pode tomar dano se já estiver morto
+    
+    let multiplier = DAMAGE_MULTIPLIER_DEFAULT;
+    switch (hitboxKey?.toLowerCase()) { // Adicionado '?' para segurança e toLowerCase
+        case 'head': multiplier = DAMAGE_MULTIPLIER_HEAD; break;
+        case 'torso': multiplier = DAMAGE_MULTIPLIER_TORSO; break;
+        case 'arms': multiplier = DAMAGE_MULTIPLIER_ARMS; break;
+        case 'legs': multiplier = DAMAGE_MULTIPLIER_LEGS; break;
+        default: multiplier = DAMAGE_MULTIPLIER_DEFAULT;
+    }
+    const finalAmount = Math.round(baseAmount * multiplier);
     
     const previousHealth = this.health;
-    this.health = clamp(this.health - amount, 0, this.maxHealth);
+    this.health = clamp(this.health - finalAmount, 0, this.maxHealth);
     
-    // Log Aprimorado (Tarefa 3)
-    log(`Player ${this.id} (${this.name}) took ${amount} damage. Health: ${previousHealth.toFixed(0)} -> ${this.health.toFixed(0)}/${this.maxHealth.toFixed(0)}`);
+    log(`Player ${this.id} (${this.name}) took ${finalAmount} damage (${baseAmount} * ${multiplier.toFixed(1)}x at ${hitboxKey}). Health: ${previousHealth.toFixed(0)} -> ${this.health.toFixed(0)}/${this.maxHealth.toFixed(0)}`);
     
-    if (this.health <= 0) {
+    if (this.health <= 0 && this.isAlive) { // Só processa morte uma vez
         this.isAlive = false;
         log(`Player ${this.id} (${this.name}) has died.`);
-        // Chama o método onDeath no ServerPlayer (se existir)
         if (typeof this.onDeath === 'function') {
             this.onDeath();
         }
@@ -188,27 +205,91 @@ export class Player extends GameObject {
   }
 
   /**
-   * Calcula e retorna a Axis-Aligned Bounding Box (AABB) do jogador no espaço do mundo.
-   * @param {Vector3} [pos=this.position] - Posição opcional para calcular AABB (útil para colisão preditiva).
-   * @returns {{min: Vector3, max: Vector3}} A AABB do jogador.
+   * Calcula a AABB do jogador na posição especificada (pés na posição Y).
+   * @param {Vector3} [pos=this.position] - Posição base (pés) para calcular a AABB.
+   * @returns {{min: Vector3, max: Vector3}}
    */
   getBoundingBox(pos = this.position) {
-    const halfWidth = this.width / 2;
-    const halfDepth = this.depth / 2;
-    // Expansão reduzida para colisão mais precisa com obstáculos
-    const expansion = 0.01;
-    return {
-        min: new Vector3(
-            pos.x - halfWidth - expansion,
-            pos.y - expansion, // Base Y (pés estão em pos.y)
-            pos.z - halfDepth - expansion
-        ),
-        max: new Vector3(
-            pos.x + halfWidth + expansion,
-            pos.y + this.height + expansion, // Topo Y = base + altura
-            pos.z + halfDepth + expansion
-        ),
-    };
+    return this._calculateAABB(pos);
   }
-  
+
+  /**
+   * Calcula e retorna as Hitboxes AABB do jogador no espaço do mundo na posição atual.
+   * @returns {Object.<string, {min: Vector3, max: Vector3}>} Mapa de hitboxes.
+   */
+  getHitboxes() {
+    return this._calculateHitboxes(this.position);
+  }
+
+  /**
+   * Calcula a AABB em uma posição específica (helper interno).
+   * @param {Vector3} pos - A posição base (pés) para calcular a AABB.
+   * @returns {{min: Vector3, max: Vector3}}
+   * @protected
+   */
+  _calculateAABB(pos) {
+      const halfWidth = this.width / 2;
+      const halfDepth = this.depth / 2;
+      const expansion = 0.01;
+      return {
+          min: new Vector3(
+              pos.x - halfWidth - expansion,
+              pos.y - expansion, // Base Y
+              pos.z - halfDepth - expansion
+          ),
+          max: new Vector3(
+              pos.x + halfWidth + expansion,
+              pos.y + this.height + expansion, // Topo Y = base + altura
+              pos.z + halfDepth + expansion
+          ),
+      };
+  }
+
+   /**
+   * Calcula as hitboxes em uma posição específica (helper interno).
+   * @param {Vector3} pos - A posição base (pés) para calcular as hitboxes.
+   * @returns {Object.<string, {min: Vector3, max: Vector3}>} Mapa de hitboxes.
+   * @protected
+   */
+   _calculateHitboxes(pos) {
+      const hitboxes = {};
+      const epsilon = 0.02; // Pequena sobreposição/folga
+
+      // Dimensões relativas para o modelo voxel
+      const headSize = this.width * 0.7; // Cabeça cúbica
+      const torsoHeight = this.height * 0.45;
+      const torsoWidth = this.width;
+      const torsoDepth = this.depth * 0.8;
+      const legHeight = this.height * 0.4;
+      const legWidth = this.width * 0.4; // Pernas mais finas
+      const legDepth = this.depth * 0.4;
+      // Braços omitidos por simplicidade, mas poderiam ser adicionados
+
+      const legTopY = pos.y + legHeight;
+      const torsoTopY = legTopY + torsoHeight;
+      const headCenterY = torsoTopY + headSize / 2; // Centro do cubo da cabeça
+
+      // Cabeça (Cubo)
+      const headCenter = new Vector3(pos.x, headCenterY, pos.z);
+      hitboxes['head'] = {
+          min: headCenter.clone().subtract(new Vector3(headSize / 2 + epsilon, headSize / 2 + epsilon, headSize / 2 + epsilon)),
+          max: headCenter.clone().add(new Vector3(headSize / 2 + epsilon, headSize / 2 + epsilon, headSize / 2 + epsilon))
+      };
+
+      // Tronco
+      const torsoCenter = new Vector3(pos.x, legTopY + torsoHeight / 2, pos.z);
+      hitboxes['torso'] = {
+          min: torsoCenter.clone().subtract(new Vector3(torsoWidth / 2 + epsilon, torsoHeight / 2 + epsilon, torsoDepth / 2 + epsilon)),
+          max: torsoCenter.clone().add(new Vector3(torsoWidth / 2 + epsilon, torsoHeight / 2 + epsilon, torsoDepth / 2 + epsilon))
+      };
+
+      // Pernas (Caixa única - simplificado, poderia ser duas)
+      const legCenter = new Vector3(pos.x, pos.y + legHeight / 2, pos.z);
+      hitboxes['legs'] = {
+          min: legCenter.clone().subtract(new Vector3(legWidth / 2 + epsilon, legHeight / 2 + epsilon, legDepth / 2 + epsilon)), // Usando legWidth/Depth
+          max: legCenter.clone().add(new Vector3(legWidth / 2 + epsilon, legHeight / 2 + epsilon, legDepth / 2 + epsilon))
+      };
+
+      return hitboxes;
+  }
 }
