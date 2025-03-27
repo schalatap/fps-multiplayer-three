@@ -31,6 +31,10 @@ class GameClient {
     lastFrameTime = 0;
     animationFrameId = null;
 
+    // --- NOVO: Referências aos elementos da mira ---
+    crosshairHorizontalEl = null;
+    crosshairVerticalEl = null;
+
     constructor() {
         this.logger = this.createClientLogger();
 
@@ -38,6 +42,14 @@ class GameClient {
         if (!gameContainer) {
             throw new Error("Fatal Error: #game-container element not found in DOM.");
         }
+
+        // --- NOVO: Obter referências da mira ---
+        this.crosshairHorizontalEl = document.getElementById('crosshair-h');
+        this.crosshairVerticalEl = document.getElementById('crosshair-v');
+        if (!this.crosshairHorizontalEl || !this.crosshairVerticalEl) {
+             this.logger.warn("Crosshair elements not found in DOM.");
+        }
+        // --- FIM NOVO ---
 
         try {
             this.initialize(gameContainer);
@@ -174,12 +186,34 @@ class GameClient {
              this.sceneManager.update();
         }
 
+        // --- NOVO: Atualizar Visibilidade da Mira ---
+        this.updateCrosshairVisibility();
+        // --- FIM NOVO ---
+
         // 4. Atualizar UI (Descomentar quando implementar)
         // if (this.uiManager) this.uiManager.update();
 
         // Verificar input para toggle do painel (Descomentar quando implementar)
         // if (this.inputController?.didPressAttributePanelKey()) { ... }
     }
+
+    // --- NOVO: Método para atualizar a mira ---
+    updateCrosshairVisibility() {
+        if (!this.crosshairHorizontalEl || !this.crosshairVerticalEl || !this.clientWorld || !this.networkManager) {
+            return; // Não faz nada se elementos ou sistemas não estiverem prontos
+        }
+
+        const localPlayer = this.clientWorld.getPlayer(this.networkManager.getLocalPlayerId());
+
+        // Esconde a mira se o jogador local existe E está mirando (isAiming é true)
+        const shouldHideCrosshair = localPlayer ? localPlayer.isAiming : false;
+
+        // Aplica display: none ou display: block
+        const displayStyle = shouldHideCrosshair ? 'none' : 'block';
+        this.crosshairHorizontalEl.style.display = displayStyle;
+        this.crosshairVerticalEl.style.display = displayStyle;
+    }
+    // --- FIM NOVO ---
 
     /**
      * Renderiza a cena do jogo.

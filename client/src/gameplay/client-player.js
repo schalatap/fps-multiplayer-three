@@ -14,6 +14,7 @@ import {
     MIN_SPEED_THRESHOLD,  // <-- NOVO
     GRAVITY // <-- Importar GRAVITY
 } from '../../../shared/constants/game-settings.js';
+import * as THREE from 'three';
 
 // Tipos para JSDoc (melhora autocomplete e verificação)
 /** @typedef {import('../core/input-controller.js').InputController} InputController */
@@ -24,6 +25,12 @@ import {
 // Tempo (em ms) que tentamos renderizar 'atrás' do último estado recebido.
 const RENDER_DELAY = SERVER_TICK_INTERVAL_MS * 1.5;
 const RECONCILIATION_THRESHOLD_SQ = 0.05 * 0.05; // Limiar (quadrado) para corrigir posição (5cm)
+
+// --- Constantes de Posição da Arma ---
+const WEAPON_DOWN_ROTATION_X = Math.PI / 2.5; // Deve coincidir com a rotação inicial do generator
+const WEAPON_AIM_ROTATION_X = 0; // Rotação para apontar para frente
+const WEAPON_HIP_FIRE_ROTATION_X = Math.PI / 12; // Leve inclinação para cima ao atirar sem mirar
+const WEAPON_POSE_LERP_SPEED = 15; // Velocidade de interpolação da pose da arma
 
 // --- Injeção de Dependência Temporária (GLOBAL - EVITAR EM PRODUÇÃO) ---
 // Idealmente, injetar via construtor, container DI, ou passagem pelo ClientWorld.
@@ -73,6 +80,13 @@ export class ClientPlayer extends Player {
     walkSpeedFactor = 8; // Quão rápido a animação de andar toca
     walkAmplitude = 0.4; // Quão amplo é o movimento de braços/pernas
     // -----------------------------
+
+    /** @type {boolean} */
+    isAiming = false; // Estado de mira
+
+    // Propriedade para suavizar a rotação da arma
+    /** @type {number} */
+    currentWeaponTargetRotationX = WEAPON_DOWN_ROTATION_X;
 
     /**
      * @param {PlayerState} initialState - O primeiro estado recebido do servidor.
@@ -188,6 +202,11 @@ export class ClientPlayer extends Player {
     update(deltaTime) {
         const isLocalPlayer = this.id === NetworkManager.getLocalPlayerId();
         let isMovingHorizontally = false; // Flag para animação
+
+        // Obter estado do input ANTES de usar na predição/interpolação
+        const currentKeys = isLocalPlayer && _inputController ? _inputController.getActionKeysState() : null;
+        // Atualiza isAiming independentemente de estar vivo, o input é lido de qualquer forma
+        this.isAiming = isLocalPlayer && currentKeys ? currentKeys.Aim : false;
 
         if (isLocalPlayer) {
             // --- Predição de Movimento (Jogador Local) ---
@@ -311,13 +330,41 @@ export class ClientPlayer extends Player {
             }
             // --- Fim Animação ---
 
-            // --- Visibilidade da Arma na Mão ---
+            // --- Visibilidade e Posição da Arma na Mão ---
+            // Procure a arma DENTRO do update, APÓS garantir que this.mesh existe
             const heldWeapon = this.mesh.getObjectByName('HeldWeapon');
             if (heldWeapon) {
-                // Só mostra a arma na mão para jogadores REMOTOS (não o local)
-                heldWeapon.visible = !isLocalPlayer && this.isAlive;
+                // A arma é visível SE o jogador (dono do mesh) está vivo.
+                heldWeapon.visible = this.isAlive;
+
+                // --- Lógica de Pose da Arma (LOCAL PLAYER ONLY) ---
+                if (isLocalPlayer && this.isAlive && currentKeys) {
+                    // Determina a rotação X alvo baseada no input
+                    if (this.isAiming) { // Prioriza mira
+                        this.currentWeaponTargetRotationX = WEAPON_AIM_ROTATION_X;
+                    } else if (currentKeys.Fire) { // Se não está mirando, mas está atirando
+                        this.currentWeaponTargetRotationX = WEAPON_HIP_FIRE_ROTATION_X;
+                    } else { // Se não está mirando nem atirando
+                        this.currentWeaponTargetRotationX = WEAPON_DOWN_ROTATION_X;
+                    }
+
+                    // Interpola suavemente a rotação X
+                    heldWeapon.rotation.x = THREE.MathUtils.lerp(
+                        heldWeapon.rotation.x,
+                        this.currentWeaponTargetRotationX,
+                        WEAPON_POSE_LERP_SPEED * deltaTime
+                    );
+
+                } else if (!isLocalPlayer && this.isAlive) {
+                    // Para jogadores remotos, força a pose padrão (ou interpola estado da rede no futuro)
+                    heldWeapon.rotation.x = WEAPON_DOWN_ROTATION_X;
+                } else if (!this.isAlive) {
+                    // Se morto, pode forçar a rotação para baixo também
+                    heldWeapon.rotation.x = WEAPON_DOWN_ROTATION_X;
+                }
+                // --- Fim Lógica de Pose ---
             }
-            // ---------------------------------
+            // --- Fim Lógica Arma ---
         }
     }
 

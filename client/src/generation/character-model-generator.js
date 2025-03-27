@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { PLAYER_HEIGHT, PLAYER_WIDTH, PLAYER_DEPTH } from '../../../shared/base/collidable.js';
 // Importar gerador de arma
 import { createWeaponMesh } from './weapon-model-generator.js';
-import { log } from '../../../shared/utils/logger.js';
+import { log, warn } from '../../../shared/utils/logger.js';
 
 // Cache de Materiais
 const materialCache = {
@@ -180,20 +180,35 @@ export function createStylizedPlayerModel() {
     });
 
     // --- Anexar Arma (Pistola na mão direita) ---
+    log("[CLIENT] Searching for 'rightHand' group..."); // Log search
     const rightHand = playerGroup.getObjectByName('rightHand');
     if (rightHand) {
+        log("[CLIENT] Found 'rightHand' group. Creating weapon mesh...");
         const weaponMesh = createWeaponMesh('pistol');
         if (weaponMesh) {
+            log("[CLIENT] Weapon mesh created successfully. Attaching...");
             weaponMesh.name = "HeldWeapon";
             weaponMesh.userData.isHeldWeapon = true;
-            // Ajustar posição/rotação/escala da arma relativa à mão
-            weaponMesh.scale.set(0.4, 0.4, 0.4);
-            weaponMesh.position.set(0, -handSize * 0.2, handSize * 0.3);
-            weaponMesh.rotation.x = Math.PI / 18;
-            weaponMesh.rotation.y = Math.PI / 12;
+            
+            // --- AJUSTES DE POSSE INICIAL ---
+            // Escala
+            weaponMesh.scale.set(0.5, 0.5, 0.5);
+            
+            // Posição relativa à mão (ajuste fino)
+            weaponMesh.position.set(handSize * 0.1, -handSize * 0.3, -handSize * 0.4); // Ajuste X, Y, Z
+            
+            // Rotação inicial (APONTANDO PARA BAIXO)
+            weaponMesh.rotation.x = Math.PI / 2.5; // Aponta para baixo
+            weaponMesh.rotation.y = Math.PI / 18; // Leve rotação em Y
+            // --- FIM AJUSTES DE POSSE INICIAL ---
+            
             rightHand.add(weaponMesh);
-            log("[CLIENT] Attached weapon to player's right hand");
+            log(`[CLIENT] Attached weapon '${weaponMesh.name}' to '${rightHand.name}'. Weapon position: ${weaponMesh.position.toArray().join(',')}`);
+        } else {
+            warn("[CLIENT] Failed to create weapon mesh for attachment.");
         }
+    } else {
+        warn("[CLIENT] Could not find 'rightHand' group to attach weapon.");
     }
 
     return playerGroup;

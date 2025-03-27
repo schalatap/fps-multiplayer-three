@@ -51,6 +51,12 @@ export class InputController {
      * @type {boolean}
      */
     mouseButton0 = false;
+    
+    /**
+     * Estado do botão secundário do mouse (clique direito).
+     * @type {boolean}
+     */
+    mouseButton2 = false;
 
     // Handlers de eventos vinculados (para remover listeners corretamente)
     boundOnMouseMove;
@@ -102,6 +108,8 @@ export class InputController {
         document.addEventListener('pointerlockerror', this.boundOnPointerLockError, false);
         this.targetElement.addEventListener('mousedown', this.boundOnMouseDown, false);
         document.addEventListener('mouseup', this.boundOnMouseUp, false);
+        // Capture contextmenu para prevenir menu padrão no right click DENTRO do jogo
+        this.targetElement.addEventListener('contextmenu', (e) => e.preventDefault());
         // O listener de mousemove é adicionado/removido dinamicamente com o pointer lock
     }
 
@@ -115,6 +123,7 @@ export class InputController {
         document.removeEventListener('pointerlockerror', this.boundOnPointerLockError, false);
         document.removeEventListener('mousemove', this.boundOnMouseMove, false); // Garante remoção
         this.targetElement.removeEventListener('mousedown', this.boundOnMouseDown, false);
+        this.targetElement.removeEventListener('contextmenu', (e) => e.preventDefault());
         document.removeEventListener('mouseup', this.boundOnMouseUp, false);
         log('[CLIENT] InputController listeners removed.');
     }
@@ -182,11 +191,12 @@ export class InputController {
      * @param {MouseEvent} event
      */
     onMouseDown(event) {
-        // Button 0 é o botão esquerdo principal
-        if (event.button === 0) {
+        if (!this.isPointerLocked) return; // Só processa cliques se o ponteiro estiver travado
+        if (event.button === 0) { // Botão esquerdo
             this.mouseButton0 = true;
+        } else if (event.button === 2) { // Botão direito
+            this.mouseButton2 = true;
         }
-        // Adicionar outros botões se necessário (1: meio, 2: direito)
     }
 
     /**
@@ -194,8 +204,11 @@ export class InputController {
      * @param {MouseEvent} event
      */
     onMouseUp(event) {
-        if (event.button === 0) {
+        // Mouse up pode acontecer mesmo fora do pointer lock, então processamos sempre
+        if (event.button === 0) { // Botão esquerdo
             this.mouseButton0 = false;
+        } else if (event.button === 2) { // Botão direito
+            this.mouseButton2 = false;
         }
     }
 
@@ -248,6 +261,17 @@ export class InputController {
     }
 
     /**
+     * Verifica se um botão do mouse está pressionado.
+     * @param {number} buttonIndex 0 for left, 2 for right.
+     * @returns {boolean}
+     */
+    isMouseButtonDown(buttonIndex) {
+        if (buttonIndex === 0) return this.mouseButton0;
+        if (buttonIndex === 2) return this.mouseButton2;
+        return false;
+    }
+
+    /**
      * Obtém o ângulo de rotação horizontal (yaw) atual.
      * @returns {number} Yaw em radianos.
      */
@@ -266,7 +290,7 @@ export class InputController {
     /**
      * Retorna um objeto com o estado atual das teclas de movimento e ação.
      * Útil para enviar ao servidor (Etapa 10).
-     * @returns {{W: boolean, A: boolean, S: boolean, D: boolean, Shift: boolean, Space: boolean, Fire: boolean, Cast1: boolean, Cast2: boolean}}
+     * @returns {{W: boolean, A: boolean, S: boolean, D: boolean, Shift: boolean, Space: boolean, Fire: boolean, Aim: boolean, Cast1: boolean, Cast2: boolean}}
      */
     getActionKeysState() {
         return {
@@ -277,6 +301,7 @@ export class InputController {
             Shift: this.isKeyPressed('SHIFT'),
             Space: this.isKeyPressed(' '), // Barra de espaço
             Fire: this.mouseButton0 || this.isKeyPressed('F'), // Modificado para incluir clique do mouse
+            Aim: this.mouseButton2, // Estado do botão direito para mirar
             Cast1: this.isKeyPressed('1'), // Tecla 1 para magia 1
             Cast2: this.isKeyPressed('2'), // Tecla 2 para magia 2
             // Adicionar mais teclas de ação conforme necessário

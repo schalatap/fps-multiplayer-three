@@ -12,7 +12,8 @@ const IMPACT_COLORS = {
     static: 0xcccccc,   // Cinza para superfície genérica
     box: 0x9d6a3f,      // Marrom para caixas
     tree: 0x44aa44,     // Verde para árvores
-    ramp: 0xaaaaaa      // Cinza claro para rampas
+    ramp: 0xaaaaaa,     // Cinza claro para rampas
+    ground: 0x8b4513    // Marrom escuro para chão (cor de terra)
 };
 
 export class Renderer {
@@ -208,6 +209,8 @@ export class Renderer {
         let color;
         if (surfaceType === 'player') {
             color = IMPACT_COLORS.player;
+        } else if (obstacleType === 'ground') { // Verifica especificamente impacto no chão
+            color = IMPACT_COLORS.ground;
         } else if (obstacleType && IMPACT_COLORS[obstacleType]) {
             color = IMPACT_COLORS[obstacleType];
         } else {

@@ -34,6 +34,8 @@ export class MovementSystem {
     update(entities, deltaTime, players) {
         if (deltaTime <= 0) return;
 
+        const GROUND_Y = this.mapBounds.min.y; // Cache ground level
+
         for (const entity of entities) {
             if (!(entity.position instanceof Vector3) || !(entity.velocity instanceof Vector3) || typeof entity.getBoundingBox !== 'function') {
                  continue;
@@ -52,7 +54,8 @@ export class MovementSystem {
             const potentialPosition = previousPosition.clone().add(deltaPosition);
 
             let finalPosition = potentialPosition; // Posição final padrão
-            let projectileStopped = false; // Flag para indicar se o projétil deve parar de se mover
+            let projectileStoppedByHit = false; // Flag para hit com objeto/jogador
+            let projectileStoppedByGround = false; // Flag para hit com chão
 
             // --- LÓGICA ESPECÍFICA PARA PROJÉTEIS ---
             if (entity instanceof Projectile && !entity.markForRemoval) {
@@ -83,7 +86,7 @@ export class MovementSystem {
                     finalHitResult = hitStaticResult || hitPlayerResult;
                 }
                 
-                if (finalHitResult) {
+                if (finalHitResult && finalHitResult.t >= 0 && finalHitResult.t <= 1) {
                     // Calcula o ponto exato de impacto
                     const impactPoint = previousPosition.clone().add(
                         deltaPosition.clone().multiplyScalar(finalHitResult.t)
@@ -91,11 +94,11 @@ export class MovementSystem {
                     
                     // Define a posição final como o ponto de impacto
                     finalPosition = impactPoint;
-                    projectileStopped = true;
+                    projectileStoppedByHit = true;
                     entity.markForRemoval = true;
                     entity.velocity.zero(); // Zera a velocidade explicitamente
                     
-                    // Emitir evento para broadcast DEPOIS de determinar o tipo
+                    // Emitir evento para broadcast
                     if (global.eventEmitter) {
                         global.eventEmitter.emit('broadcastImpactEffect', {
                             projectileId: entity.id,
@@ -109,17 +112,52 @@ export class MovementSystem {
                     if (finalHitResult.target) { // Hit em jogador
                         log(`Collision resolved: Proj ${entity.id} hit Player ${finalHitResult.target.id} at exact impact point`);
                         try {
-                            // Usar hitboxKey se estiver disponível, ou 'default'
                             const hitboxKey = finalHitResult.hitboxKey || 'default';
                             finalHitResult.target.takeDamage(entity.damage, hitboxKey);
                         } catch(e) {
-                            warn(`Error applying damage from proj ${entity.id} to player ${finalHitResult.target.id}:`, e);
+                            warn(`Error applying damage:`, e);
                         }
                     } else if (finalHitResult.obstacle) { // Hit em obstáculo
                         log(`Collision resolved: Proj ${entity.id} hit Obstacle ${finalHitResult.obstacle.type} at exact impact point`);
                     }
                 }
+                
+                // --- 5. CHECK GROUND COLLISION (SE NÃO HOUVE HIT POR RAYCAST) ---
+                if (!projectileStoppedByHit) {
+                    // Verifica se o segmento cruza o plano do chão
+                    if (previousPosition.y >= GROUND_Y && potentialPosition.y < GROUND_Y) {
+                        // Calcula o tempo 't' de interseção com o plano do chão (y = GROUND_Y)
+                        const t_ground = (GROUND_Y - previousPosition.y) / (potentialPosition.y - previousPosition.y);
+                        
+                        // Garante que a interseção ocorra dentro do segmento de movimento deste frame
+                        if (t_ground >= 0 && t_ground <= 1) {
+                            const groundImpactPoint = previousPosition.clone().add(
+                                deltaPosition.clone().multiplyScalar(t_ground)
+                            );
+                            finalPosition = groundImpactPoint;
+                            projectileStoppedByGround = true; // Marca como parado pelo chão
+                            entity.markForRemoval = true;
+                            entity.velocity.zero(); // Para o movimento
+                            
+                            log(`Collision resolved: Proj ${entity.id} hit GROUND at ${groundImpactPoint.toString()}`);
+                            
+                            // Emite evento de impacto para o hit no chão
+                            if (global.eventEmitter) {
+                                global.eventEmitter.emit('broadcastImpactEffect', {
+                                    projectileId: entity.id,
+                                    position: [groundImpactPoint.x, groundImpactPoint.y, groundImpactPoint.z],
+                                    surfaceType: 'static', // Chão é estático
+                                    obstacleType: 'ground' // Tipo específico para chão
+                                });
+                            }
+                        }
+                    }
+                }
+                // --- FIM DA VERIFICAÇÃO DE COLISÃO COM O CHÃO ---
             }
+
+            // Combina flags de parada
+            const projectileStopped = projectileStoppedByHit || projectileStoppedByGround;
 
             // --- Resolução de Colisão com Limites (Se o projétil não foi parado por colisão) ---
             if (!projectileStopped) {
@@ -130,7 +168,6 @@ export class MovementSystem {
                 );
                 
                 // --- Resolve Colisão com Obstáculos Estáticos ---
-                // (Somente para entidades que não são projéteis atingidos)
                 finalPosition = this.collisionSystem.resolveStaticObstacleCollision(
                     entity,
                     finalPosition, // Posição após ajuste de limites
@@ -142,9 +179,7 @@ export class MovementSystem {
             entity.position.copy(finalPosition);
 
             // Zera velocidade Y se colidiu com o chão
-            const GROUND_Y = this.mapBounds.min.y;
             const IS_ON_GROUND = finalPosition.y <= GROUND_Y + 0.01;
-
             if (IS_ON_GROUND && entity.velocity.y < 0) {
                  entity.velocity.y = 0;
             }
