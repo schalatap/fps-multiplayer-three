@@ -24,13 +24,27 @@ import * as THREE from 'three';
 
 // Tempo (em ms) que tentamos renderizar 'atrás' do último estado recebido.
 const RENDER_DELAY = SERVER_TICK_INTERVAL_MS * 1.5;
-const RECONCILIATION_THRESHOLD_SQ = 0.05 * 0.05; // Limiar (quadrado) para corrigir posição (5cm)
+// --- AUMENTAR THRESHOLD: Tolerância de ~20cm antes de corrigir posição ---
+const RECONCILIATION_THRESHOLD_SQ = 0.2 * 0.2; // Era 0.05 * 0.05
+
+const ARM_AIM_UPPER_ROTATION = -Math.PI/6; // Ajuste do braço superior ao mirar
+const ARM_AIM_LOWER_ROTATION = -Math.PI/3; // Ajuste do antebraço ao mirar
 
 // --- Constantes de Posição da Arma ---
 const WEAPON_DOWN_ROTATION_X = Math.PI / 2.5; // Deve coincidir com a rotação inicial do generator
 const WEAPON_AIM_ROTATION_X = 0; // Rotação para apontar para frente
 const WEAPON_HIP_FIRE_ROTATION_X = Math.PI / 12; // Leve inclinação para cima ao atirar sem mirar
 const WEAPON_POSE_LERP_SPEED = 15; // Velocidade de interpolação da pose da arma
+
+// --- NOVAS Constantes para Pose de Mira Fixa ---
+// Estas constantes definem a pose do modelo de TERCEIRA PESSOA ao mirar.
+// Elas NÃO afetam diretamente a visão em primeira pessoa, que depende do Renderer.
+const AIM_POSE_ARM_ROTATION_X = -Math.PI/10; // Braço ligeiramente levantado
+const AIM_POSE_ARM_ROTATION_Z = -Math.PI/18; // Braço ligeiramente para dentro
+const AIM_POSE_WEAPON_ROTATION_X = Math.PI/36; // Arma quase reta relativa à mão (ajuste fino)
+
+// --- Constantes de Posição do BRAÇO --- NEW! ---
+const ARM_AIM_LERP_SPEED = 10; // Velocidade de interpolação do braço ao mirar
 
 // --- Injeção de Dependência Temporária (GLOBAL - EVITAR EM PRODUÇÃO) ---
 // Idealmente, injetar via construtor, container DI, ou passagem pelo ClientWorld.
@@ -88,6 +102,10 @@ export class ClientPlayer extends Player {
     /** @type {number} */
     currentWeaponTargetRotationX = WEAPON_DOWN_ROTATION_X;
 
+    // --- NOVO: Propriedades para Mira do Braço ---
+    // --- REMOVED targetArmRotationX and targetArmRotationZ properties ---
+    targetArmRotationX = 0; // Target for shoulder pivot X
+
     /**
      * @param {PlayerState} initialState - O primeiro estado recebido do servidor.
      */
@@ -105,7 +123,7 @@ export class ClientPlayer extends Player {
         this.targetStateTimestamp = initialState.timestamp || Date.now();
         this.lastStateTimestamp = this.targetStateTimestamp - SERVER_TICK_INTERVAL_MS; // Estima timestamp anterior
 
-        // Criação do Mesh 3D
+        // Criação do Mesh 3D (modelo de terceira pessoa)
         try {
             this.mesh = createPlayerMesh();
             // Associar ID da entidade ao UUID do mesh pode ajudar a encontrá-lo na cena
@@ -114,7 +132,7 @@ export class ClientPlayer extends Player {
             this.mesh.userData = { entityId: this.id, isPlayerMesh: true };
             this.mesh.position.copy(this.position); // Define posição inicial do mesh
             this.mesh.visible = this.isAlive; // Define visibilidade inicial
-            log(`[CLIENT] Created mesh for player ${this.id}. Initial visibility: ${this.isAlive}`);
+            log(`[CLIENT] Created 3rd person mesh for player ${this.id}. UUID: ${this.mesh.uuid}`);
         } catch (error) {
             warn(`[CLIENT] Failed to create mesh for player ${this.id}:`, error);
             this.mesh = null;
@@ -201,11 +219,9 @@ export class ClientPlayer extends Player {
      */
     update(deltaTime) {
         const isLocalPlayer = this.id === NetworkManager.getLocalPlayerId();
-        let isMovingHorizontally = false; // Flag para animação
+        let isMovingHorizontally = false;
 
-        // Obter estado do input ANTES de usar na predição/interpolação
         const currentKeys = isLocalPlayer && _inputController ? _inputController.getActionKeysState() : null;
-        // Atualiza isAiming independentemente de estar vivo, o input é lido de qualquer forma
         this.isAiming = isLocalPlayer && currentKeys ? currentKeys.Aim : false;
 
         if (isLocalPlayer) {
@@ -289,82 +305,138 @@ export class ClientPlayer extends Player {
             }
         }
 
-        // --- Atualização Visual (Mesh) ---
+        // --- Atualização Visual do Mesh (Modelo de Terceira Pessoa) ---
+        // Esta parte afeta principalmente como OS OUTROS JOGADORES VEEM ESTE JOGADOR,
+        // ou como este jogador se vê em uma hipotética visão de terceira pessoa.
+        // O mesh do jogador local é OCULTADO pelo Renderer na visão em primeira pessoa.
         if (this.mesh) {
             this.mesh.position.copy(this.position);
 
             // Atualiza rotação visual do jogador local para corresponder à câmera
             if (isLocalPlayer && _inputController) {
                 this.mesh.rotation.y = _inputController.getYaw();
+            } else {
+                // --- Rotação para jogadores remotos (agora usando lookYaw recebido) ---
+                if (this.targetState?.lookYaw !== undefined) {
+                    // Interpolar rotação para suavizar movimento
+                    this.mesh.rotation.y = THREE.MathUtils.lerp(this.mesh.rotation.y, this.targetState.lookYaw, deltaTime * 10);
+                } else if (this.previousState?.lookYaw !== undefined) {
+                    this.mesh.rotation.y = this.previousState.lookYaw;
+                }
             }
-            // Rotação visual para jogadores remotos (poderia ser interpolada se enviada)
 
-            // --- Animação de Andar Simples ---
+            // --- Animação de Andar / Pose dos Membros ---
+            const leftLegGroup = this.mesh.getObjectByName('leftLegGroup');
+            const rightLegGroup = this.mesh.getObjectByName('rightLegGroup');
+            const leftArmGroup = this.mesh.getObjectByName('leftArmGroup');
+            const rightArmGroup = this.mesh.getObjectByName('rightArmGroup');
+
+            // Verifica se o jogador local está ativamente mirando
+            const isActivelyAiming = isLocalPlayer && this.isAlive && currentKeys && this.isAiming;
+
+            // --- Pernas ---
             if (isMovingHorizontally && this.isAlive) {
-                this.animationTime += deltaTime * this.walkSpeedFactor;
+                this.animationTime += deltaTime * this.walkSpeedFactor; // Atualiza o tempo da animação apenas quando movendo
                 const swingAngle = Math.sin(this.animationTime) * this.walkAmplitude;
-
-                // Encontra os grupos/meshes das partes
-                const leftLegGroup = this.mesh.getObjectByName('leftLegGroup');
-                const rightLegGroup = this.mesh.getObjectByName('rightLegGroup');
-                const leftArmGroup = this.mesh.getObjectByName('leftArmGroup');
-                const rightArmGroup = this.mesh.getObjectByName('rightArmGroup');
-
-                // Aplica rotação oposta às pernas e braços
                 if (leftLegGroup) leftLegGroup.rotation.x = swingAngle;
                 if (rightLegGroup) rightLegGroup.rotation.x = -swingAngle;
-                if (leftArmGroup) leftArmGroup.rotation.x = -swingAngle; // Braço oposto à perna
-                if (rightArmGroup) rightArmGroup.rotation.x = swingAngle;
             } else {
-                // Reseta rotações se parado ou morto
-                this.animationTime = 0; // Reseta tempo para começar do 0 na próxima vez
-                const leftLegGroup = this.mesh.getObjectByName('leftLegGroup');
-                const rightLegGroup = this.mesh.getObjectByName('rightLegGroup');
-                const leftArmGroup = this.mesh.getObjectByName('leftArmGroup');
-                const rightArmGroup = this.mesh.getObjectByName('rightArmGroup');
-
-                if (leftLegGroup) leftLegGroup.rotation.x = 0;
-                if (rightLegGroup) rightLegGroup.rotation.x = 0;
-                if (leftArmGroup) leftArmGroup.rotation.x = 0;
-                if (rightArmGroup) rightArmGroup.rotation.x = 0;
+                // Não reseta animationTime, apenas pausa
+                if (leftLegGroup) leftLegGroup.rotation.x = THREE.MathUtils.lerp(leftLegGroup.rotation.x, 0, deltaTime*10); // Lerp pernas de volta para 0
+                if (rightLegGroup) rightLegGroup.rotation.x = THREE.MathUtils.lerp(rightLegGroup.rotation.x, 0, deltaTime*10);
             }
-            // --- Fim Animação ---
 
-            // --- Visibilidade e Posição da Arma na Mão ---
-            // Procure a arma DENTRO do update, APÓS garantir que this.mesh existe
+            // --- Braços com Pose de Mira Fixa ---
+            if (this.isAlive) {
+                // Define alvos padrão para cada braço
+                let rightArmTargetX = 0; // Alvo padrão X (idle)
+                let leftArmTargetX = 0;  // Alvo padrão X (idle)
+                let rightArmTargetZ = 0; // Alvo padrão Z (idle)
+                let leftArmTargetZ = 0;  // Alvo padrão Z (idle)
+
+                if (isLocalPlayer && _inputController) {
+                    if (isActivelyAiming) {
+                        // ---- MODO MIRA FIXA ----
+                        rightArmTargetX = AIM_POSE_ARM_ROTATION_X;
+                        rightArmTargetZ = AIM_POSE_ARM_ROTATION_Z;
+                        // Braço esquerdo com pose similar mas menos pronunciada
+                        leftArmTargetX = AIM_POSE_ARM_ROTATION_X * 0.8;
+                        leftArmTargetZ = Math.PI/36; // Ligeiramente para fora
+                    } else {
+                        // ---- NÃO MIRANDO ----
+                        if (isMovingHorizontally) {
+                            // Andando: Alvo é o ângulo de balanço
+                            const swingAngle = Math.sin(this.animationTime) * this.walkAmplitude;
+                            rightArmTargetX = swingAngle;
+                            leftArmTargetX = -swingAngle;
+                        }
+                        // Se parado, os alvos permanecem 0 (idle)
+                    }
+                } else {
+                    // Jogador remoto: Se estimamos que está andando, aplica balanço
+                    if (isMovingHorizontally) {
+                       const remoteSwing = Math.sin(Date.now() * 0.001 * this.walkSpeedFactor) * this.walkAmplitude; // Estimativa simples
+                       rightArmTargetX = remoteSwing;
+                       leftArmTargetX = -remoteSwing;
+                    }
+                }
+
+                // --- Aplica Rotações com Lerp ---
+                const lerpSpeed = isActivelyAiming ? ARM_AIM_LERP_SPEED * 1.5 : ARM_AIM_LERP_SPEED; // Transição mais rápida para mirar
+                if (rightArmGroup) {
+                    rightArmGroup.rotation.x = THREE.MathUtils.lerp(rightArmGroup.rotation.x, rightArmTargetX, lerpSpeed * deltaTime);
+                    rightArmGroup.rotation.z = THREE.MathUtils.lerp(rightArmGroup.rotation.z, rightArmTargetZ, lerpSpeed * deltaTime);
+                    rightArmGroup.rotation.y = THREE.MathUtils.lerp(rightArmGroup.rotation.y, 0, lerpSpeed * deltaTime); // Zerar rotação Y
+                }
+                if (leftArmGroup) {
+                    leftArmGroup.rotation.x = THREE.MathUtils.lerp(leftArmGroup.rotation.x, leftArmTargetX, lerpSpeed * deltaTime);
+                    leftArmGroup.rotation.z = THREE.MathUtils.lerp(leftArmGroup.rotation.z, leftArmTargetZ, lerpSpeed * deltaTime);
+                    leftArmGroup.rotation.y = THREE.MathUtils.lerp(leftArmGroup.rotation.y, 0, lerpSpeed * deltaTime); // Zerar rotação Y
+                }
+            } else { // Se Morto
+                // Interpola membros de volta para rotação 0 suavemente
+                if (leftLegGroup) leftLegGroup.rotation.x = THREE.MathUtils.lerp(leftLegGroup.rotation.x, 0, deltaTime*5);
+                if (rightLegGroup) rightLegGroup.rotation.x = THREE.MathUtils.lerp(rightLegGroup.rotation.x, 0, deltaTime*5);
+                if (leftArmGroup) { 
+                    leftArmGroup.rotation.x = THREE.MathUtils.lerp(leftArmGroup.rotation.x, 0, deltaTime*5); 
+                    leftArmGroup.rotation.z = THREE.MathUtils.lerp(leftArmGroup.rotation.z, 0, deltaTime*5); 
+                }
+                if (rightArmGroup) { 
+                    rightArmGroup.rotation.x = THREE.MathUtils.lerp(rightArmGroup.rotation.x, 0, deltaTime*5); 
+                    rightArmGroup.rotation.z = THREE.MathUtils.lerp(rightArmGroup.rotation.z, 0, deltaTime*5); 
+                }
+            }
+
+            // --- Visibilidade e Pose da Arma (Relativa à Mão) ---
             const heldWeapon = this.mesh.getObjectByName('HeldWeapon');
             if (heldWeapon) {
-                // A arma é visível SE o jogador (dono do mesh) está vivo.
                 heldWeapon.visible = this.isAlive;
 
-                // --- Lógica de Pose da Arma (LOCAL PLAYER ONLY) ---
+                let targetWeaponRotX = WEAPON_DOWN_ROTATION_X; // Pose padrão (arma para baixo)
+                let targetWeaponRotY = 0;
+                let targetWeaponRotZ = 0;
+
                 if (isLocalPlayer && this.isAlive && currentKeys) {
-                    // Determina a rotação X alvo baseada no input
-                    if (this.isAiming) { // Prioriza mira
-                        this.currentWeaponTargetRotationX = WEAPON_AIM_ROTATION_X;
-                    } else if (currentKeys.Fire) { // Se não está mirando, mas está atirando
-                        this.currentWeaponTargetRotationX = WEAPON_HIP_FIRE_ROTATION_X;
-                    } else { // Se não está mirando nem atirando
-                        this.currentWeaponTargetRotationX = WEAPON_DOWN_ROTATION_X;
+                    // Determina a rotação da arma RELATIVA À MÃO
+                    if (isActivelyAiming) {
+                        // Quando mirando, usa a pose fixa de mira
+                        targetWeaponRotX = AIM_POSE_WEAPON_ROTATION_X;
+                    } else if (currentKeys.Fire) {
+                        // Pose de tiro sem mira
+                        targetWeaponRotX = WEAPON_HIP_FIRE_ROTATION_X;
                     }
-
-                    // Interpola suavemente a rotação X
-                    heldWeapon.rotation.x = THREE.MathUtils.lerp(
-                        heldWeapon.rotation.x,
-                        this.currentWeaponTargetRotationX,
-                        WEAPON_POSE_LERP_SPEED * deltaTime
-                    );
-
-                } else if (!isLocalPlayer && this.isAlive) {
-                    // Para jogadores remotos, força a pose padrão (ou interpola estado da rede no futuro)
-                    heldWeapon.rotation.x = WEAPON_DOWN_ROTATION_X;
-                } else if (!this.isAlive) {
-                    // Se morto, pode forçar a rotação para baixo também
-                    heldWeapon.rotation.x = WEAPON_DOWN_ROTATION_X;
+                    // Senão, mantém pose padrão (arma para baixo)
                 }
-                // --- Fim Lógica de Pose ---
+
+                // Interpola rotação local da arma
+                heldWeapon.rotation.x = THREE.MathUtils.lerp(
+                    heldWeapon.rotation.x,
+                    targetWeaponRotX,
+                    WEAPON_POSE_LERP_SPEED * deltaTime
+                );
+                heldWeapon.rotation.y = THREE.MathUtils.lerp(heldWeapon.rotation.y, targetWeaponRotY, WEAPON_POSE_LERP_SPEED * deltaTime);
+                heldWeapon.rotation.z = THREE.MathUtils.lerp(heldWeapon.rotation.z, targetWeaponRotZ, WEAPON_POSE_LERP_SPEED * deltaTime);
             }
-            // --- Fim Lógica Arma ---
         }
     }
 

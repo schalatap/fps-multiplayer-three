@@ -178,6 +178,7 @@ export class Player extends GameObject {
       name: this.name,
       score: this.score,
       isAlive: this.isAlive, // Inclui isAlive no estado (Etapa 20)
+      lookYaw: this.lookYaw, // --- ADICIONADO: Inclui lookYaw para sincronização ---
       // Futuramente: Adicionar ID ou tipo da arma equipada ao estado?
       // currentWeaponType: this.currentWeapon?.constructor.name.toLowerCase() ?? null,
       // ammo: this.currentWeapon?.ammo ?? 0,
@@ -202,6 +203,7 @@ export class Player extends GameObject {
         // }
         this.isAlive = state.isAlive;
     }
+    if (state.lookYaw !== undefined) this.lookYaw = state.lookYaw; // --- ADICIONADO: Aplica lookYaw recebido ---
   }
 
   /**

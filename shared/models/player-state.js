@@ -15,8 +15,9 @@
  * @property {number} maxHealth - A vida máxima do jogador.
  * @property {string} name - O nome do jogador.
  * @property {number} score - A pontuação do jogador.
+ * @property {boolean} isAlive - Se o jogador está vivo.
+ * @property {number} lookYaw - Rotação horizontal em radianos.
  * // Propriedades futuras a serem adicionadas conforme necessário:
- * // @property {boolean} isAlive
  * // @property {number} mana
  * // @property {number} maxMana
  * // @property {object} attributes - Estado do AttributeSet

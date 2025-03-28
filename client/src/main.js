@@ -205,11 +205,10 @@ class GameClient {
 
         const localPlayer = this.clientWorld.getPlayer(this.networkManager.getLocalPlayerId());
 
-        // Esconde a mira se o jogador local existe E está mirando (isAiming é true)
-        const shouldHideCrosshair = localPlayer ? localPlayer.isAiming : false;
+        // --- CORREÇÃO: Mostrar mira APENAS quando mirando ---
+        const shouldShowCrosshair = localPlayer ? localPlayer.isAiming : false;
+        const displayStyle = shouldShowCrosshair ? 'block' : 'none'; // Mostrar se mirando, esconder caso contrário
 
-        // Aplica display: none ou display: block
-        const displayStyle = shouldHideCrosshair ? 'none' : 'block';
         this.crosshairHorizontalEl.style.display = displayStyle;
         this.crosshairVerticalEl.style.display = displayStyle;
     }

@@ -40,14 +40,14 @@ export function createWeaponMesh(weaponType = 'pistol') {
     switch (weaponType.toLowerCase()) {
         case 'pistol':
             try {
-                // Dimensões relativas (ajuste conforme necessário)
-                const bodyLength = 0.2;
+                // Dimensões ajustadas para visão em primeira pessoa (estilo CS)
+                const bodyLength = 0.25; // Aumentado um pouco
                 const bodyHeight = 0.08;
                 const bodyWidth = 0.04;
                 const gripHeight = 0.12;
                 const gripWidth = bodyWidth * 0.9;
                 const gripDepth = 0.08;
-                const barrelLength = 0.05;
+                const barrelLength = 0.1; // Cano mais longo para visibilidade
                 const barrelRadius = bodyWidth * 0.2;
 
                 // Geometrias
@@ -60,30 +60,35 @@ export function createWeaponMesh(weaponType = 'pistol') {
                 const gripMat = getWeaponMaterial('grip');
                 const barrelMat = getWeaponMaterial('metal_grey');
 
-                // --- Meshes e Posicionamento Relativo à Origem do Grupo (Empunhadura) ---
-                // A origem Y=0 estará na parte superior do cabo.
-                // A origem Z=0 estará na parte traseira do corpo/slide.
-                // A origem X=0 estará no centro.
-
-                // Corpo/Slide (um pouco à frente e acima da origem)
+                // --- Meshes e Posicionamento Otimizado para Primeira Pessoa ---
+                
+                // Corpo/Slide - posicionado para ser visível em primeira pessoa
                 const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
-                bodyMesh.position.set(0, bodyHeight / 2 + 0.01, -bodyLength / 2 + 0.01); // Centrado X, acima da origem Y, frente da origem Z
+                bodyMesh.position.set(0, bodyHeight / 2 + 0.01, -bodyLength / 2);
                 bodyMesh.castShadow = true;
                 weaponGroup.add(bodyMesh);
 
-                // Cabo/Grip (abaixo e ligeiramente atrás da origem Y/Z)
+                // Cabo/Grip - ajustado para segurar em primeira pessoa
                 const gripMesh = new THREE.Mesh(gripGeo, gripMat);
-                gripMesh.position.set(0, -gripHeight / 2, gripDepth / 2 - 0.02); // Centrado X, abaixo da origem Y, parte traseira alinhada com a origem Z
-                gripMesh.rotation.x = THREE.MathUtils.degToRad(10); // Leve inclinação para trás
+                gripMesh.position.set(0, -gripHeight / 2, gripDepth / 2 - 0.01);
+                gripMesh.rotation.x = THREE.MathUtils.degToRad(5); // Inclinação mais sutil
                 gripMesh.castShadow = true;
                 weaponGroup.add(gripMesh);
 
-                // Cano (à frente do corpo)
+                // Cano - mais longo e visível em primeira pessoa
                 const barrelMesh = new THREE.Mesh(barrelGeo, barrelMat);
                 barrelMesh.rotation.z = Math.PI / 2; // Cilindro deitado no eixo X
-                barrelMesh.position.set(0, bodyMesh.position.y - bodyHeight * 0.3, bodyMesh.position.z - bodyLength / 2 - barrelLength / 2); // Alinhado abaixo e à frente do corpo
+                barrelMesh.position.set(0, bodyMesh.position.y - bodyHeight * 0.2, 
+                                       bodyMesh.position.z - bodyLength / 2 - barrelLength / 2);
                 barrelMesh.castShadow = true;
                 weaponGroup.add(barrelMesh);
+
+                // Ajustes adicionais para mira
+                weaponGroup.userData.aimPoint = {
+                    x: 0,
+                    y: bodyMesh.position.y + bodyHeight/4,
+                    z: barrelMesh.position.z - barrelLength/2 - 0.05 // Ponto de mira um pouco à frente do cano
+                };
 
                 return weaponGroup;
 
@@ -93,10 +98,7 @@ export function createWeaponMesh(weaponType = 'pistol') {
             }
 
         // Adicionar cases para outras armas aqui...
-        // case 'rifle':
-        //     // ... criar geometria do rifle ...
-        //     return rifleGroup;
-
+        
         default:
             warn(`[CLIENT] Unknown weaponType requested for mesh generation: ${weaponType}`);
             return null;

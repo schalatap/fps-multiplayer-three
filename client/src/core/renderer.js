@@ -3,6 +3,7 @@ import { log, warn } from '../../../shared/utils/logger.js';
 import gameMap from '../../../shared/gameplay/world/map.js'; // Importar para pegar limites
 import { PLAYER_EYE_HEIGHT } from '../../../shared/constants/game-settings.js'; // Importar a constante unificada
 import { createWeaponMesh } from '../generation/weapon-model-generator.js';
+import { NetworkManager } from '../network/network-manager.js'; // Importar para obter ID local
 
 const IMPACT_EFFECT_DURATION_MS = 500; // Duração do efeito em milissegundos
 const IMPACT_EFFECT_SIZE = 0.3;
@@ -15,6 +16,20 @@ const IMPACT_COLORS = {
     ramp: 0xaaaaaa,     // Cinza claro para rampas
     ground: 0x8b4513    // Marrom escuro para chão (cor de terra)
 };
+
+// --- Constantes para Camera ADS ---
+const CAMERA_NORMAL_FOV = 75;
+const CAMERA_AIM_FOV = 60; // FOV menor para zoom ao mirar
+const CAMERA_FOV_LERP_SPEED = 10; // Velocidade de interpolação do FOV
+
+// --- Offset de Mira (para estilo Counter Strike) ---
+const CAMERA_FORWARD_OFFSET = 0.2; // Câmera ligeiramente à frente do personagem
+const CAMERA_AIM_OFFSET = new THREE.Vector3(0, -0.05, 0.3); // Posicionamento quando mirando
+
+const CAMERA_POS_LERP_SPEED = 12; // Velocidade de interpolação da posição
+
+// --- Partes do corpo a serem ocultadas em primeira pessoa ---
+const FIRST_PERSON_HIDDEN_PARTS = ['head', 'torso', 'back'];
 
 export class Renderer {
     /** @type {THREE.Scene} */
@@ -31,6 +46,19 @@ export class Renderer {
     clientWorld;
     /** @type {Array<{mesh: THREE.Object3D, removeAt: number}>} */
     activeImpactEffects = [];
+    /** @type {number} */
+    targetFov = CAMERA_NORMAL_FOV;
+    /** @type {THREE.Vector3} */
+    targetCameraOffset = new THREE.Vector3(0, 0, 0); // Offset ADICIONAL da câmera (para ADS)
+    /** @type {THREE.Vector3} */
+    currentCameraOffset = new THREE.Vector3(0, 0, 0); // Offset atual interpolado
+
+    /**
+     * Guarda o ID do mesh do jogador local para controle de visibilidade.
+     * @type {string | null}
+     * @private
+     */
+    _localPlayerMeshId = null;
 
     /**
      * Cria uma instância do Renderer.
@@ -64,10 +92,10 @@ export class Renderer {
 
     initializeCamera() {
         const aspect = this.container.clientWidth / this.container.clientHeight;
-        this.camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
+        this.camera = new THREE.PerspectiveCamera(CAMERA_NORMAL_FOV, aspect, 0.1, 1000);
         this.camera.rotation.order = 'YXZ';
-        this.camera.position.set(0, 5, 10); // Posição inicial pode precisar de ajuste
-        this.camera.lookAt(0, 0, 0);
+        this.camera.position.set(0, 1.7, 0); // Posição inicial pode precisar de ajuste
+        this.camera.lookAt(0, 1.7, -1);
     }
 
     initializeRenderer() {
@@ -108,12 +136,6 @@ export class Renderer {
 
         this.scene.add(this.directionalLight);
         this.scene.add(this.directionalLight.target);
-
-        // --- Helpers (Descomentar para Debug) ---
-        // const lightHelper = new THREE.DirectionalLightHelper(this.directionalLight, 10);
-        // this.scene.add(lightHelper);
-        // const shadowCameraHelper = new THREE.CameraHelper(this.directionalLight.shadow.camera);
-        // this.scene.add(shadowCameraHelper);
     }
 
     /**
@@ -144,14 +166,64 @@ export class Renderer {
      * Renderiza a cena a partir da perspectiva da câmera.
      */
     render() {
-        // Processar eventos de impacto antes de renderizar
         this.processImpactEvents();
-        
-        // Atualizar efeitos existentes 
         this.updateImpactEffects();
-        
-        // Renderizar a cena
+
+        // --- FPS: Ocultar seletivamente partes do jogador local ---
+        const localPlayerId = NetworkManager.getLocalPlayerId();
+        if (localPlayerId) {
+            // Guarda o ID se ainda não tivermos
+            if (!this._localPlayerMeshId) {
+                const localPlayerEntity = this.clientWorld?.getPlayer(localPlayerId);
+                if (localPlayerEntity?.mesh) {
+                    this._localPlayerMeshId = localPlayerEntity.mesh.uuid; // Usar UUID do mesh
+                    
+                    // Configurar visibilidade inicial das partes
+                    this.configureLocalPlayerVisibility(localPlayerEntity.mesh);
+                }
+            } else {
+                // Atualizar visibilidade conforme necessário
+                const localPlayerMesh = this.scene.getObjectByProperty('uuid', this._localPlayerMeshId);
+                if (localPlayerMesh) {
+                    this.updateLocalPlayerVisibility(localPlayerMesh);
+                }
+            }
+        }
+
         this.webGLRenderer.render(this.scene, this.camera);
+    }
+
+    /**
+     * Configura a visibilidade inicial das partes do corpo do jogador local para primeira pessoa.
+     * @param {THREE.Object3D} playerMesh - O mesh do jogador local
+     */
+    configureLocalPlayerVisibility(playerMesh) {
+        if (!playerMesh) return;
+        
+        // Percorre recursivamente todos os filhos do mesh
+        playerMesh.traverse((child) => {
+            if (child.userData && child.userData.bodyPart) {
+                // Ocultar partes específicas do corpo para vista em primeira pessoa
+                const shouldHide = FIRST_PERSON_HIDDEN_PARTS.some(part => 
+                    child.userData.bodyPart.includes(part));
+                
+                if (shouldHide) {
+                    child.visible = false;
+                }
+            }
+        });
+        
+        log('[CLIENT] First-person view configured - selective body part visibility.');
+    }
+
+    /**
+     * Atualiza a visibilidade das partes do corpo do jogador local baseado na rotação da câmera.
+     * Por exemplo, pode ocultar braços se olhar muito para cima.
+     * @param {THREE.Object3D} playerMesh - O mesh do jogador local
+     */
+    updateLocalPlayerVisibility(playerMesh) {
+        // Aqui poderíamos implementar lógica adicional para ajustar a visibilidade
+        // de certas partes dependendo do pitch da câmera, por exemplo
     }
 
     /**
@@ -272,38 +344,57 @@ export class Renderer {
     }
 
     /**
-     * Atualiza a posição e rotação da câmera.
-     * @param {import('../gameplay/client-player.js').ClientPlayer | null} localPlayer
-     * @param {import('./input-controller.js').InputController} inputController
+     * Atualiza a posição e rotação da câmera para visão em primeira pessoa.
+     * @param {import('../gameplay/client-player.js').ClientPlayer | null | undefined} localPlayer
+     * @param {import('./input-controller.js').InputController | null} inputController
      */
     updateCamera(localPlayer, inputController) {
-        if (!inputController) return; // Não faz nada se não houver input controller
+        if (!inputController) return;
 
-        if (!localPlayer) {
-            // Se não há jogador local (ex: ainda conectando), usa uma visão padrão
-            this.camera.position.set(0, 5, 10);
-            this.camera.lookAt(0, 0, 0);
-            // Garante que a rotação padrão seja aplicada
-            this.camera.rotation.set(0, 0, 0);
-            this.camera.rotation.order = 'YXZ'; // Mantém a ordem correta
-            return;
+        // --- Rotação da Câmera ---
+        // Diretamente do input controller. Ordem YXZ é crucial.
+        this.camera.rotation.y = inputController.getYaw();   // Rotação horizontal
+        this.camera.rotation.x = inputController.getPitch(); // Rotação vertical
+        this.camera.rotation.z = 0;                          // Roll sempre zero
+
+        // --- Posição Base da Câmera ---
+        const cameraBasePosition = new THREE.Vector3();
+        if (localPlayer) {
+            // Posição dos "olhos" do jogador
+            cameraBasePosition.copy(localPlayer.position);
+            cameraBasePosition.y += PLAYER_EYE_HEIGHT;
+            
+            // Adicionar offset para frente (estilo CS)
+            const forwardVector = new THREE.Vector3(0, 0, -CAMERA_FORWARD_OFFSET);
+            forwardVector.applyQuaternion(this.camera.quaternion);
+            cameraBasePosition.add(forwardVector);
+        } else {
+            // Posição padrão se não houver jogador (ex: carregando)
+            cameraBasePosition.set(0, 5, 10);
         }
 
-        // --- Atualizar Rotação da Câmera ---
-        const yaw = inputController.getYaw();   // Rotação horizontal
-        const pitch = inputController.getPitch(); // Rotação vertical (limitada no InputController)
+        // --- FOV e Offset (ADS) ---
+        const isAiming = localPlayer ? localPlayer.isAiming : false;
+        this.targetFov = isAiming ? CAMERA_AIM_FOV : CAMERA_NORMAL_FOV;
+        
+        // Quando estiver mirando, aplica offset adicional (arma mais centralizada)
+        const targetOffsetLocal = isAiming ? CAMERA_AIM_OFFSET : new THREE.Vector3(0, 0, 0);
 
-        // Aplica a rotação à câmera (YXZ order)
-        this.camera.rotation.y = yaw;   // Gira horizontalmente
-        this.camera.rotation.x = pitch; // Gira verticalmente
+        // Interpolar FOV
+        this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, this.targetFov, CAMERA_FOV_LERP_SPEED * 0.016);
+        this.camera.updateProjectionMatrix();
 
-        // --- Atualizar Posição da Câmera ---
-        // Copia a posição base do jogador
-        this.camera.position.copy(localPlayer.position);
-        // Adiciona o offset da altura dos olhos usando a constante importada
-        this.camera.position.y += PLAYER_EYE_HEIGHT;
+        // Interpolar Offset Local da Câmera
+        this.currentCameraOffset.lerp(targetOffsetLocal, CAMERA_POS_LERP_SPEED * 0.016);
 
-        // A direção para onde a câmera olha é determinada pela sua rotação.
+        // Calcular a posição final da câmera: Base + Offset Local transformado para World
+        const finalCameraPosition = cameraBasePosition.clone();
+        const worldOffset = this.currentCameraOffset.clone();
+        worldOffset.applyQuaternion(this.camera.quaternion);
+        finalCameraPosition.add(worldOffset);
+
+        // Aplicar posição final à câmera
+        this.camera.position.copy(finalCameraPosition);
     }
 
     /**
@@ -311,11 +402,38 @@ export class Renderer {
      */
     dispose() {
         window.removeEventListener('resize', this.updateSize.bind(this));
+        
+        // Limpar efeitos de impacto restantes
+        this.activeImpactEffects.forEach(effect => {
+            this.scene.remove(effect.mesh);
+            effect.mesh.geometry?.dispose();
+            if (Array.isArray(effect.mesh.material)) {
+                effect.mesh.material.forEach(m => m.dispose());
+            } else {
+                effect.mesh.material?.dispose();
+            }
+        });
+        this.activeImpactEffects = [];
+
+        // Limpar cena de forma mais robusta
+        while(this.scene.children.length > 0){
+             const child = this.scene.children[0];
+             this.scene.remove(child);
+             // Tentar limpar geometria/material se for Mesh
+             if (child instanceof THREE.Mesh) {
+                 child.geometry?.dispose();
+                 if (Array.isArray(child.material)) {
+                     child.material.forEach(m => m.dispose());
+                 } else {
+                     child.material?.dispose();
+                 }
+             }
+        }
+
         if (this.webGLRenderer) {
             this.container.removeChild(this.webGLRenderer.domElement);
-            this.webGLRenderer.dispose(); // Libera recursos WebGL
+            this.webGLRenderer.dispose();
         }
-        // Limpar cena (dispose de geometrias/materiais se necessário)
         log('[CLIENT] Renderer disposed.');
     }
 }

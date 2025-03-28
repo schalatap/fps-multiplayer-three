@@ -6,7 +6,7 @@ import { log, warn } from '../../../shared/utils/logger.js';
 
 // Cache de Materiais
 const materialCache = {
-    skin: new THREE.MeshStandardMaterial({ color: 0xE0AC69, roughness: 0.8, name: 'SkinMat' }), // Tom de pele mais específico
+    skin: new THREE.MeshStandardMaterial({ color: 0xE0AC69, roughness: 0.8, name: 'SkinMat' }), // Tom de pele
     hair: new THREE.MeshStandardMaterial({ color: 0x402810, roughness: 0.9, name: 'HairMat' }), // Marrom escuro cabelo
     shirt: new THREE.MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.7, name: 'ShirtMat' }), // Branco/Cinza claro camisa
     pants: new THREE.MeshStandardMaterial({ color: 0x506070, roughness: 0.7, name: 'PantsMat' }), // Azul/Cinza calça
@@ -16,7 +16,8 @@ const materialCache = {
 
 /**
  * Cria um modelo 3D low-poly estilizado para o jogador.
- * Retorna um THREE.Group com a base (pés) na origem (0,0,0).
+ * O modelo é construído com a frente voltada para -Z (padrão Three.js).
+ * A origem do grupo é na base (Y=0), centro (X=0, Z=0).
  * @returns {THREE.Group} O grupo contendo as partes do corpo do jogador.
  */
 export function createStylizedPlayerModel() {
@@ -80,12 +81,15 @@ export function createStylizedPlayerModel() {
     const headGroup = new THREE.Group();
     headGroup.name = 'HeadGroup';
     const headMesh = new THREE.Mesh(headGeo, materialCache.skin);
-    headMesh.castShadow = true; headMesh.receiveShadow = true; headMesh.userData.bodyPart = 'head';
+    headMesh.castShadow = true; headMesh.receiveShadow = true;
+    headMesh.userData.bodyPart = 'head'; // Marcação para visibilidade em primeira pessoa
     headGroup.add(headMesh);
+    
     // Cabelo
     const hairMesh = new THREE.Mesh(hairGeo, materialCache.hair);
     hairMesh.position.y = headHeight * 0.3; // Ajustar para encaixar
-    hairMesh.castShadow = true; hairMesh.receiveShadow = false; // Cabelo não precisa receber
+    hairMesh.castShadow = true; hairMesh.receiveShadow = false;
+    hairMesh.userData.bodyPart = 'head_hair'; // Parte da cabeça
     headGroup.add(hairMesh);
     headGroup.position.y = headY;
     playerGroup.add(headGroup);
@@ -94,20 +98,24 @@ export function createStylizedPlayerModel() {
     const neckMesh = new THREE.Mesh(neckGeo, materialCache.skin);
     neckMesh.position.y = neckY;
     neckMesh.castShadow = true; neckMesh.receiveShadow = true;
+    neckMesh.userData.bodyPart = 'neck'; // Parte do pescoço
     playerGroup.add(neckMesh);
 
     // Torso
     const torsoMesh = new THREE.Mesh(torsoGeo, materialCache.shirt);
     torsoMesh.position.y = torsoY;
-    torsoMesh.castShadow = true; torsoMesh.receiveShadow = true; torsoMesh.userData.bodyPart = 'torso';
+    torsoMesh.castShadow = true; torsoMesh.receiveShadow = true;
+    torsoMesh.userData.bodyPart = 'torso'; // Marcação para visibilidade em primeira pessoa
     playerGroup.add(torsoMesh);
 
-    // Mochila (Anexada ao Torso)
+    // Mochila (Anexada ao Grupo Principal, posicionada atrás do Torso)
     const backpackMesh = new THREE.Mesh(backpackGeo, materialCache.backpack);
-    backpackMesh.position.z = -(torsoDepth / 2 + (torsoDepth * 0.5) / 2); // Atrás do torso
+    // Posiciona a mochila nas costas do personagem (Z positivo agora é para trás)
+    backpackMesh.position.z = torsoDepth / 2 + (torsoDepth * 0.5) / 2; // Atrás do torso (Z+ agora)
     backpackMesh.position.y = torsoY * 0.95; // Um pouco mais baixo no torso
     backpackMesh.castShadow = true; backpackMesh.receiveShadow = true;
-    playerGroup.add(backpackMesh); // Adiciona ao grupo principal
+    backpackMesh.userData.bodyPart = 'back'; // Marcação para visibilidade em primeira pessoa
+    playerGroup.add(backpackMesh);
 
     // Braços (Esquerdo e Direito como Grupos)
     const armOffsetX = shoulderWidth / 2; // Pivô no ombro
@@ -122,7 +130,7 @@ export function createStylizedPlayerModel() {
         upperArmMesh.position.y = -upperArmLength / 2; // Pivô no topo
         upperArmMesh.rotation.x = Math.PI / 2; // Alinhar cilindro com eixo Y
         upperArmMesh.castShadow = true; upperArmMesh.receiveShadow = true;
-        upperArmMesh.userData.bodyPart = `arm_upper_${side[0]}`;
+        upperArmMesh.userData.bodyPart = `arm_upper_${side[0]}`; // Marcação para animação
         armGroup.add(upperArmMesh);
 
         // Antebraço (relativo ao fim do braço superior)
@@ -130,7 +138,7 @@ export function createStylizedPlayerModel() {
         lowerArmMesh.position.y = -upperArmLength - lowerArmLength / 2;
         lowerArmMesh.rotation.x = Math.PI / 2; // Alinhar cilindro com eixo Y
         lowerArmMesh.castShadow = true; lowerArmMesh.receiveShadow = true;
-        lowerArmMesh.userData.bodyPart = `arm_lower_${side[0]}`;
+        lowerArmMesh.userData.bodyPart = `arm_lower_${side[0]}`; // Marcação para animação
         armGroup.add(lowerArmMesh);
 
         // Mão
@@ -138,7 +146,7 @@ export function createStylizedPlayerModel() {
         handMesh.position.y = -upperArmLength - lowerArmLength - handSize / 2;
         handMesh.castShadow = true; handMesh.receiveShadow = true;
         handMesh.name = `${side}Hand`; // Nome para encontrar e anexar arma
-        handMesh.userData.bodyPart = `hand_${side[0]}`;
+        handMesh.userData.bodyPart = `hand_${side[0]}`; // Marcação para animação
         armGroup.add(handMesh);
 
         playerGroup.add(armGroup);
@@ -157,7 +165,7 @@ export function createStylizedPlayerModel() {
         upperLegMesh.position.y = upperLegY;
         upperLegMesh.rotation.x = Math.PI / 2; // Alinhar cilindro com eixo Y
         upperLegMesh.castShadow = true; upperLegMesh.receiveShadow = true;
-        upperLegMesh.userData.bodyPart = `leg_upper_${side[0]}`;
+        upperLegMesh.userData.bodyPart = `leg_upper_${side[0]}`; // Marcação para animação
         legGroup.add(upperLegMesh);
 
         // Perna Inferior
@@ -165,15 +173,15 @@ export function createStylizedPlayerModel() {
         lowerLegMesh.position.y = lowerLegY;
         lowerLegMesh.rotation.x = Math.PI / 2; // Alinhar cilindro com eixo Y
         lowerLegMesh.castShadow = true; lowerLegMesh.receiveShadow = true;
-        lowerLegMesh.userData.bodyPart = `leg_lower_${side[0]}`;
+        lowerLegMesh.userData.bodyPart = `leg_lower_${side[0]}`; // Marcação para animação
         legGroup.add(lowerLegMesh);
 
-        // Pé
+        // Pé - ajustado para olhar na direção correta (Z-)
         const footMesh = new THREE.Mesh(footGeo, materialCache.shoes);
         footMesh.position.y = footY; // Centro do pé
-        footMesh.position.z = footLength * 0.1; // Ligeiramente à frente
+        footMesh.position.z = -footLength * 0.1; // Ligeiramente à frente (Z- é frente)
         footMesh.castShadow = true; footMesh.receiveShadow = true;
-        footMesh.userData.bodyPart = `foot_${side[0]}`;
+        footMesh.userData.bodyPart = `foot_${side[0]}`; // Marcação para animação
         legGroup.add(footMesh);
 
         playerGroup.add(legGroup);
@@ -190,17 +198,15 @@ export function createStylizedPlayerModel() {
             weaponMesh.name = "HeldWeapon";
             weaponMesh.userData.isHeldWeapon = true;
             
-            // --- AJUSTES DE POSSE INICIAL ---
-            // Escala
+            // --- AJUSTES DE POSSE (VISÃO EM TERCEIRA PESSOA) ---
             weaponMesh.scale.set(0.5, 0.5, 0.5);
             
-            // Posição relativa à mão (ajuste fino)
-            weaponMesh.position.set(handSize * 0.1, -handSize * 0.3, -handSize * 0.4); // Ajuste X, Y, Z
+            // Posição ajustada para visão CS (aponta na direção Z-)
+            weaponMesh.position.set(handSize * 0.1, handSize * 0.2, -handSize * 0.6); 
             
-            // Rotação inicial (APONTANDO PARA BAIXO)
-            weaponMesh.rotation.x = Math.PI / 2.5; // Aponta para baixo
-            weaponMesh.rotation.y = Math.PI / 18; // Leve rotação em Y
-            // --- FIM AJUSTES DE POSSE INICIAL ---
+            // Rotação inicial neutra (será ajustada conforme aim)
+            weaponMesh.rotation.x = 0; // Será ajustado dinamicamente
+            weaponMesh.rotation.y = 0;
             
             rightHand.add(weaponMesh);
             log(`[CLIENT] Attached weapon '${weaponMesh.name}' to '${rightHand.name}'. Weapon position: ${weaponMesh.position.toArray().join(',')}`);
@@ -210,7 +216,7 @@ export function createStylizedPlayerModel() {
     } else {
         warn("[CLIENT] Could not find 'rightHand' group to attach weapon.");
     }
-
+    
     return playerGroup;
 }
 
